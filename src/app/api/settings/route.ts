@@ -34,6 +34,7 @@ const settingDefinitions: Record<string, { category: string; description: string
   'general.auto_cleanup': { category: 'general', description: 'Enable automatic data cleanup', default: 'false' },
   'general.auto_backup': { category: 'general', description: 'Enable automatic daily backups', default: 'false' },
   'general.backup_retention_count': { category: 'general', description: 'Number of backup files to keep', default: '10' },
+  'general.show_promo_banner': { category: 'general', description: 'Show promotional banner in the app header area', default: 'true' },
 }
 
 /**

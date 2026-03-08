@@ -100,6 +100,16 @@ export function SettingsPanel() {
       })
       const data = await res.json()
       if (res.ok) {
+        if (Object.prototype.hasOwnProperty.call(changes, 'general.show_promo_banner')) {
+          try {
+            window.localStorage.setItem('mc.showPromoBanner', changes['general.show_promo_banner'] === 'true' ? 'true' : 'false')
+          } catch {
+            // Ignore storage failures in private mode/restricted environments.
+          }
+          window.dispatchEvent(new CustomEvent('mc:promo-banner-visibility', {
+            detail: { show: changes['general.show_promo_banner'] === 'true' }
+          }))
+        }
         showFeedback(true, `Saved ${data.count} setting${data.count === 1 ? '' : 's'}`)
         setEdits({})
         fetchSettings()
@@ -296,7 +306,7 @@ export function SettingsPanel() {
                     />
                   )}
 
-                  {!setting.is_default && (
+                  {!setting.is_default && !isBooleanish && (
                     <button
                       onClick={() => handleReset(setting.key)}
                       title="Reset to default"
