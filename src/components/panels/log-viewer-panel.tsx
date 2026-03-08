@@ -14,6 +14,22 @@ interface LogFilters {
   session?: string
 }
 
+type LogLevel = 'info' | 'warn' | 'error' | 'debug'
+
+function normalizeLogLevel(level: unknown): LogLevel {
+  if (typeof level !== 'string') return 'info'
+  const normalized = level.trim().toLowerCase()
+  if (normalized === 'warning') return 'warn'
+  if (normalized === 'info' || normalized === 'warn' || normalized === 'error' || normalized === 'debug') {
+    return normalized
+  }
+  return 'info'
+}
+
+function toDisplayText(value: unknown): string {
+  return typeof value === 'string' ? value : String(value ?? '')
+}
+
 export function LogViewerPanel() {
   const { logs, logFilters, setLogFilters, clearLogs, addLog } = useMissionControl()
   const [isAutoScroll, setIsAutoScroll] = useState(true)
@@ -137,8 +153,8 @@ export function LogViewerPanel() {
     }
   }
 
-  const getLogLevelColor = (level: string) => {
-    switch (level.toLowerCase()) {
+  const getLogLevelColor = (level: unknown) => {
+    switch (normalizeLogLevel(level)) {
       case 'error': return 'text-red-400'
       case 'warn': return 'text-yellow-400'
       case 'info': return 'text-blue-400'
@@ -147,8 +163,8 @@ export function LogViewerPanel() {
     }
   }
 
-  const getLogLevelBg = (level: string) => {
-    switch (level.toLowerCase()) {
+  const getLogLevelBg = (level: unknown) => {
+    switch (normalizeLogLevel(level)) {
       case 'error': return 'bg-red-500/10 border-red-500/20'
       case 'warn': return 'bg-yellow-500/10 border-yellow-500/20'
       case 'info': return 'bg-blue-500/10 border-blue-500/20'
@@ -157,11 +173,21 @@ export function LogViewerPanel() {
     }
   }
 
+  const selectedLevel = logFilters.level ? normalizeLogLevel(logFilters.level) : undefined
+  const selectedSource = logFilters.source ? toDisplayText(logFilters.source) : undefined
+  const selectedSearch = logFilters.search ? toDisplayText(logFilters.search).toLowerCase() : ''
+  const selectedSession = logFilters.session ? toDisplayText(logFilters.session) : undefined
+
   const filteredLogs = logs.filter(entry => {
-    if (logFilters.level && entry.level !== logFilters.level) return false
-    if (logFilters.source && entry.source !== logFilters.source) return false
-    if (logFilters.search && !entry.message.toLowerCase().includes(logFilters.search.toLowerCase())) return false
-    if (logFilters.session && (!entry.session || !entry.session.includes(logFilters.session))) return false
+    const entryLevel = normalizeLogLevel(entry.level)
+    const entrySource = toDisplayText(entry.source)
+    const entryMessage = toDisplayText(entry.message)
+    const entrySession = entry.session == null ? '' : toDisplayText(entry.session)
+
+    if (selectedLevel && entryLevel !== selectedLevel) return false
+    if (selectedSource && entrySource !== selectedSource) return false
+    if (selectedSearch && !entryMessage.toLowerCase().includes(selectedSearch)) return false
+    if (selectedSession && !entrySession.includes(selectedSession)) return false
     return true
   })
 
@@ -302,46 +328,55 @@ export function LogViewerPanel() {
               No logs match the current filters
             </div>
           ) : (
-            filteredLogs.map((log) => (
-              <div 
-                key={log.id} 
-                className={`border-l-4 pl-4 py-2 rounded-r-md ${getLogLevelBg(log.level)}`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center space-x-2 text-xs">
-                      <span className="text-muted-foreground">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </span>
-                      <span className={`font-medium uppercase ${getLogLevelColor(log.level)}`}>
-                        {log.level}
-                      </span>
-                      <span className="text-muted-foreground">
-                        [{log.source}]
-                      </span>
-                      {log.session && (
+            filteredLogs.map((log, index) => {
+              const logLevel = normalizeLogLevel(log.level)
+              const logSource = toDisplayText(log.source)
+              const logMessage = toDisplayText(log.message)
+              const logSession = log.session == null ? '' : toDisplayText(log.session)
+              const logTimestamp = Number.isFinite(log.timestamp) ? log.timestamp : Date.now()
+              const logId = typeof log.id === 'string' && log.id.trim().length > 0 ? log.id : `log-row-${index}`
+
+              return (
+                <div
+                  key={logId}
+                  className={`border-l-4 pl-4 py-2 rounded-r-md ${getLogLevelBg(logLevel)}`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center space-x-2 text-xs">
                         <span className="text-muted-foreground">
-                          session:{log.session}
+                          {new Date(logTimestamp).toLocaleTimeString()}
                         </span>
+                        <span className={`font-medium uppercase ${getLogLevelColor(logLevel)}`}>
+                          {logLevel}
+                        </span>
+                        <span className="text-muted-foreground">
+                          [{logSource}]
+                        </span>
+                        {logSession && (
+                          <span className="text-muted-foreground">
+                            session:{logSession}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-foreground break-words">
+                        {logMessage}
+                      </div>
+                      {log.data && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                            Additional data
+                          </summary>
+                          <pre className="mt-1 text-xs text-muted-foreground overflow-auto">
+                            {JSON.stringify(log.data, null, 2)}
+                          </pre>
+                        </details>
                       )}
                     </div>
-                    <div className="mt-1 text-foreground break-words">
-                      {log.message}
-                    </div>
-                    {log.data && (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                          Additional data
-                        </summary>
-                        <pre className="mt-1 text-xs text-muted-foreground overflow-auto">
-                          {JSON.stringify(log.data, null, 2)}
-                        </pre>
-                      </details>
-                    )}
                   </div>
                 </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
       </div>

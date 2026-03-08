@@ -30,6 +30,32 @@ export interface LogEntry {
   data?: any
 }
 
+const VALID_LOG_LEVELS: ReadonlySet<LogEntry['level']> = new Set(['info', 'warn', 'error', 'debug'])
+
+function normalizeLogLevel(level: unknown): LogEntry['level'] {
+  if (typeof level !== 'string') return 'info'
+  const normalized = level.trim().toLowerCase()
+  if (normalized === 'warning') return 'warn'
+  return VALID_LOG_LEVELS.has(normalized as LogEntry['level']) ? (normalized as LogEntry['level']) : 'info'
+}
+
+function normalizeLogEntry(log: LogEntry): LogEntry {
+  const timestamp = Number.isFinite(log.timestamp) ? log.timestamp : Date.now()
+  const id = typeof log.id === 'string' && log.id.trim().length > 0
+    ? log.id
+    : `log-${timestamp}-${Math.random().toString(36).slice(2, 8)}`
+
+  return {
+    ...log,
+    id,
+    timestamp,
+    level: normalizeLogLevel(log.level),
+    source: typeof log.source === 'string' ? log.source : String(log.source ?? 'gateway'),
+    session: log.session == null ? undefined : String(log.session),
+    message: typeof log.message === 'string' ? log.message : String(log.message ?? ''),
+  }
+}
+
 export interface CronJob {
   id?: string
   name: string
@@ -472,17 +498,18 @@ export const useMissionControl = create<MissionControlStore>()(
     logFilters: {},
     addLog: (log) =>
       set((state) => {
+        const normalizedLog = normalizeLogEntry(log)
         // Check if log already exists to prevent duplicates
-        const existingLogIndex = state.logs.findIndex(existingLog => existingLog.id === log.id)
+        const existingLogIndex = state.logs.findIndex(existingLog => existingLog.id === normalizedLog.id)
         if (existingLogIndex !== -1) {
           // Update existing log
           const updatedLogs = [...state.logs]
-          updatedLogs[existingLogIndex] = log
+          updatedLogs[existingLogIndex] = normalizedLog
           return { logs: updatedLogs }
         }
         // Add new log at the beginning (newest first)
         return {
-          logs: [log, ...state.logs].slice(0, 1000), // Keep last 1000 logs
+          logs: [normalizedLog, ...state.logs].slice(0, 1000), // Keep last 1000 logs
         }
       }),
     setLogFilters: (filters) =>
