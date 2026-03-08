@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import Image from 'next/image'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useMissionControl } from '@/store'
 import { useNavigateToPanel } from '@/lib/navigation'
 
@@ -61,7 +62,6 @@ const navGroups: NavGroup[] = [
       { id: 'gateways', label: 'Gateways', icon: <GatewaysIcon />, priority: false },
       { id: 'gateway-config', label: 'Config', icon: <GatewayConfigIcon />, priority: false, requiresGateway: true },
       { id: 'integrations', label: 'Integrations', icon: <IntegrationsIcon />, priority: false },
-      { id: 'workspaces', label: 'Workspaces', icon: <SuperAdminIcon />, priority: false },
       { id: 'super-admin', label: 'Super Admin', icon: <SuperAdminIcon />, priority: false },
       { id: 'settings', label: 'Settings', icon: <SettingsIcon />, priority: false },
     ],
@@ -70,11 +70,46 @@ const navGroups: NavGroup[] = [
 
 // Flat list for mobile bar
 const allNavItems = navGroups.flatMap(g => g.items)
+const NAV_SCROLL_KEY = 'mc.nav-rail-scroll-top'
 
 export function NavRail() {
   const { activeTab, connection, dashboardMode, sidebarExpanded, collapsedGroups, toggleSidebar, toggleGroup } = useMissionControl()
   const navigateToPanel = useNavigateToPanel()
   const isLocal = dashboardMode === 'local'
+  const navScrollRef = useRef<HTMLDivElement>(null)
+
+  const persistNavScroll = useCallback(() => {
+    const currentTop = navScrollRef.current?.scrollTop
+    if (typeof currentTop !== 'number') return
+    try {
+      window.sessionStorage.setItem(NAV_SCROLL_KEY, String(currentTop))
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    const container = navScrollRef.current
+    if (!container) return
+    try {
+      const raw = window.sessionStorage.getItem(NAV_SCROLL_KEY)
+      if (!raw) return
+      const restored = Number(raw)
+      if (Number.isFinite(restored) && restored >= 0) {
+        container.scrollTop = restored
+      }
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [])
+
+  useEffect(() => {
+    const container = navScrollRef.current
+    if (!container) return
+    const handleScroll = () => persistNavScroll()
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [persistNavScroll])
 
   // Keyboard shortcut: [ to toggle sidebar
   useEffect(() => {
@@ -100,8 +135,15 @@ export function NavRail() {
       >
         {/* Header: Logo + toggle */}
         <div className={`flex items-center shrink-0 ${sidebarExpanded ? 'px-3 py-3 gap-2.5' : 'flex-col py-3 gap-2'}`}>
-          <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center shrink-0">
-            <span className="text-primary-foreground font-bold text-xs">MC</span>
+          <div className="w-10 h-10 flex items-center justify-center shrink-0">
+            <Image
+              src="/logo.svg"
+              alt="Mission Control"
+              width={32}
+              height={32}
+              className="h-8 w-8 object-contain"
+              priority
+            />
           </div>
           {sidebarExpanded && (
             <span className="text-sm font-semibold text-foreground truncate flex-1">Mission Control</span>
@@ -122,7 +164,7 @@ export function NavRail() {
         </div>
 
         {/* Nav groups */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
+        <div ref={navScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden py-1">
           {navGroups.map((group, groupIndex) => (
             <div key={group.id}>
               {/* Divider between groups (not before first) */}
@@ -171,7 +213,11 @@ export function NavRail() {
                         active={activeTab === item.id}
                         expanded={sidebarExpanded}
                         disabled={disabled}
-                        onClick={() => { if (!disabled) navigateToPanel(item.id) }}
+                        onClick={() => {
+                          if (disabled) return
+                          persistNavScroll()
+                          navigateToPanel(item.id)
+                        }}
                       />
                     )
                   })}

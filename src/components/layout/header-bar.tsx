@@ -43,7 +43,7 @@ export function HeaderBar() {
     alerts: 'Alert Rules',
     gateways: 'Gateway Manager',
     users: 'Users',
-    workspaces: 'Workspaces',
+    workspaces: 'Super Admin',
     'gateway-config': 'Gateway Config',
     settings: 'Settings',
   }

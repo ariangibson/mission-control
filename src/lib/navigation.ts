@@ -10,6 +10,6 @@ export function panelHref(panel: string): string {
 export function useNavigateToPanel() {
   const router = useRouter()
   return useCallback((panel: string) => {
-    router.push(panelHref(panel))
+    router.push(panelHref(panel), { scroll: false })
   }, [router])
 }
