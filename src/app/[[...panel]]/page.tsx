@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { NavRail } from '@/components/layout/nav-rail'
 import { HeaderBar } from '@/components/layout/header-bar'
@@ -133,8 +134,15 @@ export default function Home() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">MC</span>
+          <div className="w-12 h-12 flex items-center justify-center">
+            <Image
+              src="/logo.svg"
+              alt="Mission Control"
+              width={40}
+              height={40}
+              className="h-10 w-10 object-contain"
+              priority
+            />
           </div>
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
