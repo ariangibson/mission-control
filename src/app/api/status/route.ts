@@ -12,6 +12,82 @@ import { MODEL_CATALOG } from '@/lib/models'
 import { logger } from '@/lib/logger'
 import { detectProviderSubscriptions, getPrimarySubscription } from '@/lib/provider-subscriptions'
 
+const MB = 1024 * 1024
+
+interface MemorySnapshot {
+  total: number
+  used: number
+  available: number
+  usage: number
+}
+
+function toUsagePercent(used: number, total: number): number {
+  if (!Number.isFinite(total) || total <= 0) return 0
+  const pct = Math.round((used / total) * 100)
+  return Math.max(0, Math.min(100, pct))
+}
+
+/**
+ * On macOS, derive available memory from vm_stat (free + inactive + speculative)
+ * so dashboard usage is closer to Activity Monitor and less cache-biased.
+ */
+async function getMemorySnapshot(): Promise<MemorySnapshot> {
+  if (process.platform === 'darwin') {
+    try {
+      const totalMB = Math.round(os.totalmem() / MB)
+      const { stdout } = await runCommand('vm_stat', [], { timeoutMs: 3000 })
+      const pageSize = Number(stdout.match(/page size of (\d+) bytes/i)?.[1] || '4096')
+      const freePages = Number(stdout.match(/Pages free:\s+(\d+)\./i)?.[1] || '0')
+      const inactivePages = Number(stdout.match(/Pages inactive:\s+(\d+)\./i)?.[1] || '0')
+      const speculativePages = Number(stdout.match(/Pages speculative:\s+(\d+)\./i)?.[1] || '0')
+
+      const availablePages = freePages + inactivePages + speculativePages
+      const availableMB = Math.round((availablePages * pageSize) / MB)
+      const usedMB = Math.max(totalMB - availableMB, 0)
+
+      return {
+        total: totalMB,
+        used: usedMB,
+        available: availableMB,
+        usage: toUsagePercent(usedMB, totalMB),
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Error getting memory info from vm_stat')
+    }
+  }
+
+  if (process.platform !== 'darwin') {
+    try {
+      const { stdout } = await runCommand('free', ['-m'], { timeoutMs: 3000 })
+      const memLine = stdout.split('\n').find((line) => line.startsWith('Mem:'))
+      if (memLine) {
+        const parts = memLine.split(/\s+/)
+        const totalMB = parseInt(parts[1] || '0')
+        const availableMB = parseInt(parts[6] || parts[3] || '0')
+        const usedMB = Math.max(totalMB - availableMB, 0)
+        return {
+          total: totalMB,
+          used: usedMB,
+          available: availableMB,
+          usage: toUsagePercent(usedMB, totalMB),
+        }
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Error getting memory info from free')
+    }
+  }
+
+  const totalMB = Math.round(os.totalmem() / MB)
+  const availableMB = Math.round(os.freemem() / MB)
+  const usedMB = Math.max(totalMB - availableMB, 0)
+  return {
+    total: totalMB,
+    used: usedMB,
+    available: availableMB,
+    usage: toUsagePercent(usedMB, totalMB),
+  }
+}
+
 export async function GET(request: NextRequest) {
   const auth = requireRole(request, 'viewer')
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
@@ -189,7 +265,7 @@ async function getSystemStatus(workspaceId: number) {
   const status: any = {
     timestamp: Date.now(),
     uptime: 0,
-    memory: { total: 0, used: 0, available: 0 },
+    memory: { total: 0, used: 0, available: 0, usage: 0 },
     disk: { total: 0, used: 0, available: 0 },
     sessions: { total: 0, active: 0 },
     processes: []
@@ -218,35 +294,15 @@ async function getSystemStatus(workspaceId: number) {
   }
 
   try {
-    // Memory info (cross-platform)
-    if (process.platform === 'darwin') {
-      const totalBytes = os.totalmem()
-      const freeBytes = os.freemem()
-      const totalMB = Math.round(totalBytes / (1024 * 1024))
-      const usedMB = Math.round((totalBytes - freeBytes) / (1024 * 1024))
-      const availableMB = Math.round(freeBytes / (1024 * 1024))
-      status.memory = { total: totalMB, used: usedMB, available: availableMB }
-    } else {
-      const { stdout: memOutput } = await runCommand('free', ['-m'], {
-        timeoutMs: 3000
-      })
-      const memLine = memOutput.split('\n').find(line => line.startsWith('Mem:'))
-      if (memLine) {
-        const parts = memLine.split(/\s+/)
-        status.memory = {
-          total: parseInt(parts[1]) || 0,
-          used: parseInt(parts[2]) || 0,
-          available: parseInt(parts[6]) || 0
-        }
-      }
-    }
+    status.memory = await getMemorySnapshot()
   } catch (error) {
     logger.error({ err: error }, 'Error getting memory info')
   }
 
   try {
     // Disk info
-    const { stdout: diskOutput } = await runCommand('df', ['-h', '/'], {
+    const diskMountPath = process.platform === 'darwin' ? '/System/Volumes/Data' : '/'
+    const { stdout: diskOutput } = await runCommand('df', ['-h', diskMountPath], {
       timeoutMs: 3000
     })
     const lastLine = diskOutput.trim().split('\n').pop() || ''
@@ -436,7 +492,8 @@ async function performHealthCheck() {
 
   // Check disk space (cross-platform: use df -h / and parse capacity column)
   try {
-    const { stdout } = await runCommand('df', ['-h', '/'], {
+    const diskMountPath = process.platform === 'darwin' ? '/System/Volumes/Data' : '/'
+    const { stdout } = await runCommand('df', ['-h', diskMountPath], {
       timeoutMs: 3000
     })
     const lines = stdout.trim().split('\n')
@@ -461,23 +518,12 @@ async function performHealthCheck() {
 
   // Check memory usage (cross-platform)
   try {
-    let usagePercent: number
-    if (process.platform === 'darwin') {
-      const totalBytes = os.totalmem()
-      const freeBytes = os.freemem()
-      usagePercent = Math.round(((totalBytes - freeBytes) / totalBytes) * 100)
-    } else {
-      const { stdout } = await runCommand('free', ['-m'], { timeoutMs: 3000 })
-      const memLine = stdout.split('\n').find((line) => line.startsWith('Mem:'))
-      const parts = (memLine || '').split(/\s+/)
-      const total = parseInt(parts[1] || '0')
-      const available = parseInt(parts[6] || '0')
-      usagePercent = Math.round(((total - available) / total) * 100)
-    }
+    const memory = await getMemorySnapshot()
+    const usagePercent = memory.usage
 
     health.checks.push({
       name: 'Memory Usage',
-      status: usagePercent < 90 ? 'healthy' : usagePercent < 95 ? 'warning' : 'critical',
+      status: usagePercent < 95 ? 'healthy' : usagePercent < 98 ? 'warning' : 'critical',
       message: `Memory usage: ${usagePercent}%`
     })
   } catch (error) {

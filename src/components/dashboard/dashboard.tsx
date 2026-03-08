@@ -115,9 +115,12 @@ export function Dashboard() {
     )
   }
 
-  const memPct = systemStats?.memory?.total
-    ? Math.round((systemStats.memory.used / systemStats.memory.total) * 100)
-    : null
+  const memUsagePct = typeof systemStats?.memory?.usage === 'number'
+    ? systemStats.memory.usage
+    : systemStats?.memory?.total
+      ? Math.round((systemStats.memory.used / systemStats.memory.total) * 100)
+      : null
+  const diskUsagePct = systemStats?.disk?.usage ? parseInt(String(systemStats.disk.usage), 10) : null
 
   return (
     <div className="p-5 space-y-5">
@@ -227,19 +230,18 @@ export function Dashboard() {
                 status={connection.isConnected ? 'good' : 'bad'}
               />
             )}
-            {memPct != null && (
+            {systemStats?.memory && (
               <HealthRow
                 label="Memory"
-                value={`${memPct}%`}
-                status={memPct > 90 ? 'bad' : memPct > 70 ? 'warn' : 'good'}
-                bar={memPct}
+                value={formatMemoryUsedTotal(systemStats.memory)}
+                status={memUsagePct != null && memUsagePct >= 95 ? 'bad' : memUsagePct != null && memUsagePct >= 85 ? 'warn' : 'good'}
               />
             )}
             {systemStats?.disk && (
               <HealthRow
                 label="Disk"
-                value={systemStats.disk.usage || 'N/A'}
-                status={parseInt(systemStats.disk.usage) > 90 ? 'bad' : 'good'}
+                value={formatDiskUsedTotal(systemStats.disk)}
+                status={diskUsagePct != null && diskUsagePct >= 95 ? 'bad' : diskUsagePct != null && diskUsagePct >= 85 ? 'warn' : 'good'}
               />
             )}
             {systemStats?.uptime != null && (
@@ -565,11 +567,10 @@ function MetricCard({ label, value, total, subtitle, icon, color }: {
   )
 }
 
-function HealthRow({ label, value, status, bar }: {
+function HealthRow({ label, value, status }: {
   label: string
   value: string
   status: 'good' | 'warn' | 'bad'
-  bar?: number
 }) {
   const statusColor = status === 'good' ? 'text-green-400' : status === 'warn' ? 'text-amber-400' : 'text-red-400'
 
@@ -579,16 +580,6 @@ function HealthRow({ label, value, status, bar }: {
         <span className="text-xs text-muted-foreground">{label}</span>
         <span className={`text-xs font-medium font-mono-tight ${statusColor}`}>{value}</span>
       </div>
-      {bar != null && (
-        <div className="h-1 rounded-full bg-secondary overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${
-              bar > 90 ? 'bg-red-500' : bar > 70 ? 'bg-amber-500' : 'bg-green-500'
-            }`}
-            style={{ width: `${Math.min(bar, 100)}%` }}
-          />
-        </div>
-      )}
     </div>
   )
 }
@@ -658,6 +649,72 @@ function formatBytes(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+}
+
+function formatMemoryUsedTotal(memory: { used?: number; total?: number }): string {
+  const used = Number(memory?.used)
+  const total = Number(memory?.total)
+  if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0) return 'N/A'
+  return `${(used / 1024).toFixed(1)} GB of ${(total / 1024).toFixed(1)} GB Total`
+}
+
+function formatDiskUsedTotal(disk: { used?: string; total?: string; usage?: string }): string {
+  const used = typeof disk?.used === 'string' ? disk.used.trim() : ''
+  const total = typeof disk?.total === 'string' ? disk.total.trim() : ''
+  const usage = typeof disk?.usage === 'string' ? disk.usage.trim() : ''
+
+  const usedBytes = parseHumanSizeToBytes(used)
+  const totalBytes = parseHumanSizeToBytes(total)
+  if (usedBytes != null && totalBytes != null && totalBytes > 0) {
+    return `${formatMarketingGb(usedBytes)} of ${formatMarketingGb(totalBytes)} Total`
+  }
+
+  if (totalBytes != null && totalBytes > 0 && usage.endsWith('%')) {
+    const pct = Number(usage.replace('%', ''))
+    if (Number.isFinite(pct) && pct >= 0) {
+      return `${formatMarketingGb((totalBytes * pct) / 100)} of ${formatMarketingGb(totalBytes)} Total`
+    }
+  }
+
+  if (used && total) return `${used} of ${total} Total`
+  return 'N/A'
+}
+
+function parseHumanSizeToBytes(value: string): number | null {
+  if (!value) return null
+  const match = value.trim().match(/^([\d.]+)\s*([a-zA-Z]*)$/)
+  if (!match) return null
+  const amount = Number(match[1])
+  if (!Number.isFinite(amount)) return null
+
+  const unitRaw = (match[2] || 'B').toUpperCase()
+  const unit = unitRaw.endsWith('B') ? unitRaw.slice(0, -1) : unitRaw
+
+  const binaryUnits: Record<string, number> = {
+    '': 1,
+    B: 1,
+    KI: 1024,
+    MI: 1024 ** 2,
+    GI: 1024 ** 3,
+    TI: 1024 ** 4,
+    PI: 1024 ** 5,
+  }
+  if (binaryUnits[unit] != null) return amount * binaryUnits[unit]
+
+  const decimalUnits: Record<string, number> = {
+    K: 1000,
+    M: 1000 ** 2,
+    G: 1000 ** 3,
+    T: 1000 ** 4,
+    P: 1000 ** 5,
+  }
+  if (decimalUnits[unit] != null) return amount * decimalUnits[unit]
+
+  return null
+}
+
+function formatMarketingGb(bytes: number): string {
+  return `${(bytes / 1_000_000_000).toFixed(1)} GB`
 }
 
 function langColor(lang: string): string {

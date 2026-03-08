@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import { useEffect, useState } from 'react'
 import { useMissionControl } from '@/store'
 import { useNavigateToPanel } from '@/lib/navigation'
@@ -50,8 +51,15 @@ export function Sidebar() {
       {/* Logo/Brand */}
       <div className="p-6 border-b border-border">
         <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">MC</span>
+          <div className="w-10 h-10 flex items-center justify-center">
+            <Image
+              src="/logo.svg"
+              alt="Mission Control"
+              width={32}
+              height={32}
+              className="h-8 w-8 object-contain"
+              priority
+            />
           </div>
           <div>
             <h2 className="font-bold text-foreground">Mission Control</h2>
@@ -140,11 +148,15 @@ export function Sidebar() {
             <div className="space-y-1 text-xs text-muted-foreground">
               <div className="flex justify-between">
                 <span>Memory:</span>
-                <span>{systemStats.memory ? Math.round((systemStats.memory.used / systemStats.memory.total) * 100) : 0}%</span>
+                <span>
+                  {systemStats.memory
+                    ? formatMemoryUsedTotal(systemStats.memory)
+                    : 'N/A'}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span>Disk:</span>
-                <span>{systemStats.disk.usage || 'N/A'}</span>
+                <span>{formatDiskUsedTotal(systemStats.disk)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Processes:</span>
@@ -156,4 +168,70 @@ export function Sidebar() {
       </div>
     </aside>
   )
+}
+
+function formatMemoryUsedTotal(memory: { used?: number; total?: number }): string {
+  const used = Number(memory?.used)
+  const total = Number(memory?.total)
+  if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0) return 'N/A'
+  return `${(used / 1024).toFixed(1)} GB of ${(total / 1024).toFixed(1)} GB Total`
+}
+
+function formatDiskUsedTotal(disk: { used?: string; total?: string; usage?: string }): string {
+  const used = typeof disk?.used === 'string' ? disk.used.trim() : ''
+  const total = typeof disk?.total === 'string' ? disk.total.trim() : ''
+  const usage = typeof disk?.usage === 'string' ? disk.usage.trim() : ''
+
+  const usedBytes = parseHumanSizeToBytes(used)
+  const totalBytes = parseHumanSizeToBytes(total)
+  if (usedBytes != null && totalBytes != null && totalBytes > 0) {
+    return `${formatMarketingGb(usedBytes)} of ${formatMarketingGb(totalBytes)} Total`
+  }
+
+  if (totalBytes != null && totalBytes > 0 && usage.endsWith('%')) {
+    const pct = Number(usage.replace('%', ''))
+    if (Number.isFinite(pct) && pct >= 0) {
+      return `${formatMarketingGb((totalBytes * pct) / 100)} of ${formatMarketingGb(totalBytes)} Total`
+    }
+  }
+
+  if (used && total) return `${used} of ${total} Total`
+  return 'N/A'
+}
+
+function parseHumanSizeToBytes(value: string): number | null {
+  if (!value) return null
+  const match = value.trim().match(/^([\d.]+)\s*([a-zA-Z]*)$/)
+  if (!match) return null
+  const amount = Number(match[1])
+  if (!Number.isFinite(amount)) return null
+
+  const unitRaw = (match[2] || 'B').toUpperCase()
+  const unit = unitRaw.endsWith('B') ? unitRaw.slice(0, -1) : unitRaw
+
+  const binaryUnits: Record<string, number> = {
+    '': 1,
+    B: 1,
+    KI: 1024,
+    MI: 1024 ** 2,
+    GI: 1024 ** 3,
+    TI: 1024 ** 4,
+    PI: 1024 ** 5,
+  }
+  if (binaryUnits[unit] != null) return amount * binaryUnits[unit]
+
+  const decimalUnits: Record<string, number> = {
+    K: 1000,
+    M: 1000 ** 2,
+    G: 1000 ** 3,
+    T: 1000 ** 4,
+    P: 1000 ** 5,
+  }
+  if (decimalUnits[unit] != null) return amount * decimalUnits[unit]
+
+  return null
+}
+
+function formatMarketingGb(bytes: number): string {
+  return `${(bytes / 1_000_000_000).toFixed(1)} GB`
 }
